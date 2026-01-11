@@ -72,12 +72,15 @@ python -c "from vllm.distributed.kv_transfer.kv_connector.factory import KVConne
 
 ### 6. Run vLLM Server with AnchorConnector
 
+**Important**: Kimi-Linear requires HMA (Hybrid Memory Allocator) because it has both KDA and MLA layers with different cache types. vLLM auto-disables HMA when using kv-transfer-config, so we must re-enable it.
+
 ```bash
 vllm serve moonshotai/Kimi-Linear-48B-A3B-Instruct \
   --tensor-parallel-size 4 \
   --gpu-memory-utilization 0.85 \
   --max-model-len 8192 \
   --trust-remote-code \
+  --no-disable-hybrid-kv-cache-manager \
   --kv-transfer-config '{"kv_connector": "AnchorConnector", "kv_role": "kv_both", "kv_connector_extra_config": {"storage_path": "/tmp/anchors"}}'
 ```
 
@@ -144,6 +147,9 @@ Kimi-Linear needs ~100GB. Resize disk to 300GB+ in GCP Console.
 
 ### No GPU detected
 Install NVIDIA drivers: `sudo apt-get install nvidia-driver-535-server && sudo reboot`
+
+### "Hybrid KV cache manager is disabled but failed to convert..."
+vLLM auto-disables HMA when kv_transfer_config is set. Add `--no-disable-hybrid-kv-cache-manager` flag (see step 6).
 
 ## License
 
