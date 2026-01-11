@@ -30,8 +30,9 @@ Alice is 28 years old and has been coding since she was 15."""
     print("TEST 1: Generate with full context")
     print("="*60)
 
-    prompt1 = f"{context}\n\nQuestion: What is Alice's dog's name?"
-    sampling_params = SamplingParams(temperature=0.1, max_tokens=50)
+    # Use chat format for better responses
+    prompt1 = f"<|im_start|>user\n{context}\n\nWhat is Alice's dog's name?<|im_end|>\n<|im_start|>assistant\n"
+    sampling_params = SamplingParams(temperature=0.1, max_tokens=50, stop=["<|im_end|>"])
 
     outputs = llm.generate([prompt1], sampling_params)
     answer1 = outputs[0].outputs[0].text
@@ -43,7 +44,7 @@ Alice is 28 years old and has been coding since she was 15."""
     print("TEST 2: Generate WITHOUT context (baseline)")
     print("="*60)
 
-    prompt2 = "Question: What is Alice's dog's name?"
+    prompt2 = "<|im_start|>user\nWhat is Alice's dog's name?<|im_end|>\n<|im_start|>assistant\n"
     outputs = llm.generate([prompt2], sampling_params)
     answer2 = outputs[0].outputs[0].text
     print(f"Q: What is Alice's dog's name?")
@@ -93,7 +94,7 @@ Alice is 28 years old and has been coding since she was 15."""
     ]
 
     for q in questions:
-        prompt = f"{context}\n\nQuestion: {q}"
+        prompt = f"<|im_start|>user\n{context}\n\n{q}<|im_end|>\n<|im_start|>assistant\n"
         outputs = llm.generate([prompt], sampling_params)
         print(f"Q: {q}")
         print(f"A: {outputs[0].outputs[0].text.strip()}\n")
