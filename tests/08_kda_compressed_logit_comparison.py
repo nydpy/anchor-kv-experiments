@@ -395,15 +395,37 @@ def test_logit_comparison_with_vllm_api():
             return None
         return response.json()
 
-    # ─────────────────────────────────────────────────────────────────
-    # STEP 1: BASELINE - Full context processing
-    # ─────────────────────────────────────────────────────────────────
-    print("\n" + "-" * 70)
-    print("STEP 1: BASELINE - Full Context Processing")
-    print("-" * 70)
-
     context = test_data["context"]
     question = "What are Alice's hobbies?"
+    anchor_tag = f"<{test_data['id']}/>"
+
+    # ─────────────────────────────────────────────────────────────────
+    # STEP 1: ANCHOR FIRST (no KDA state loaded yet)
+    # ─────────────────────────────────────────────────────────────────
+    print("\n" + "-" * 70)
+    print("STEP 1: ANCHOR FIRST (before any context - fresh KDA state)")
+    print("-" * 70)
+
+    anchor_fresh_messages = [
+        {"role": "system", "content": f"Previous context was saved as anchor: {anchor_tag}"},
+        {"role": "user", "content": question}
+    ]
+
+    print(f"Using anchor: {anchor_tag}")
+    print("(KDA state should be empty/fresh)")
+
+    anchor_fresh_result = get_chat_completion(anchor_fresh_messages)
+    anchor_fresh_response = None
+    if anchor_fresh_result:
+        anchor_fresh_response = anchor_fresh_result["choices"][0]["message"]["content"]
+        print(f"Fresh anchor response: {anchor_fresh_response[:200]}...")
+
+    # ─────────────────────────────────────────────────────────────────
+    # STEP 2: BASELINE - Full context processing
+    # ─────────────────────────────────────────────────────────────────
+    print("\n" + "-" * 70)
+    print("STEP 2: BASELINE - Full Context Processing")
+    print("-" * 70)
 
     # Full context as system message
     baseline_messages = [
@@ -422,35 +444,25 @@ def test_logit_comparison_with_vllm_api():
     print(f"Baseline response: {baseline_response[:200]}...")
 
     # ─────────────────────────────────────────────────────────────────
-    # STEP 2: Note about KDA state
+    # STEP 3: ANCHOR AFTER BASELINE (KDA state might be loaded)
     # ─────────────────────────────────────────────────────────────────
     print("\n" + "-" * 70)
-    print("STEP 2: KDA State (handled by AnchorConnector)")
-    print("-" * 70)
-    print("The AnchorConnector saves/loads KDA state automatically.")
-    print("Check /tmp/anchors for saved states.")
-
-    # ─────────────────────────────────────────────────────────────────
-    # STEP 3: TEST - Compressed anchor (no context, just anchor tag)
-    # ─────────────────────────────────────────────────────────────────
-    print("\n" + "-" * 70)
-    print("STEP 3: TEST - Anchor Only (no context)")
+    print("STEP 3: ANCHOR AFTER BASELINE (KDA state might persist)")
     print("-" * 70)
 
-    # Anchor tag instead of full context
-    anchor_tag = f"<{test_data['id']}/>"
-    anchor_messages = [
+    anchor_after_messages = [
         {"role": "system", "content": f"Previous context was saved as anchor: {anchor_tag}"},
         {"role": "user", "content": question}
     ]
 
     print(f"Using anchor: {anchor_tag}")
+    print("(KDA state might still have info from baseline)")
 
-    anchor_result = get_chat_completion(anchor_messages)
-    anchor_response = None
-    if anchor_result:
-        anchor_response = anchor_result["choices"][0]["message"]["content"]
-        print(f"Anchor response: {anchor_response[:200]}...")
+    anchor_after_result = get_chat_completion(anchor_after_messages)
+    anchor_after_response = None
+    if anchor_after_result:
+        anchor_after_response = anchor_after_result["choices"][0]["message"]["content"]
+        print(f"Anchor after response: {anchor_after_response[:200]}...")
 
     # ─────────────────────────────────────────────────────────────────
     # STEP 4: Compare responses
@@ -462,35 +474,52 @@ def test_logit_comparison_with_vllm_api():
     # Check if key facts are mentioned
     expected_keywords = ["hiking", "photography", "cooking"]
 
-    baseline_hits = sum(1 for kw in expected_keywords if kw.lower() in baseline_response.lower())
-    anchor_hits = sum(1 for kw in expected_keywords if anchor_response and kw.lower() in anchor_response.lower()) if anchor_response else 0
+    def count_keywords(response):
+        if not response:
+            return 0
+        return sum(1 for kw in expected_keywords if kw.lower() in response.lower())
+
+    fresh_hits = count_keywords(anchor_fresh_response)
+    baseline_hits = count_keywords(baseline_response)
+    after_hits = count_keywords(anchor_after_response)
 
     print(f"""
     ┌────────────────────────────────────────────────────────────────────┐
     │  Response Comparison                                               │
     ├────────────────────────────────────────────────────────────────────┤
     │  Expected keywords: {', '.join(expected_keywords):>45}  │
-    │  Baseline found:    {baseline_hits}/{len(expected_keywords)} keywords                                      │
-    │  Anchor found:      {anchor_hits}/{len(expected_keywords)} keywords                                      │
+    ├────────────────────────────────────────────────────────────────────┤
+    │  1. Anchor FRESH (before context):  {fresh_hits}/{len(expected_keywords)} keywords                         │
+    │  2. Baseline (full context):        {baseline_hits}/{len(expected_keywords)} keywords                         │
+    │  3. Anchor AFTER baseline:          {after_hits}/{len(expected_keywords)} keywords                         │
     └────────────────────────────────────────────────────────────────────┘
     """)
 
-    print("BASELINE RESPONSE:")
-    print(f"  {baseline_response[:300]}")
+    print("1. ANCHOR FRESH (no KDA state):")
+    print(f"   {anchor_fresh_response[:250] if anchor_fresh_response else 'N/A'}")
     print()
-    print("ANCHOR RESPONSE:")
-    print(f"  {anchor_response[:300] if anchor_response else 'N/A'}")
+    print("2. BASELINE (full context):")
+    print(f"   {baseline_response[:250]}")
+    print()
+    print("3. ANCHOR AFTER (KDA state might persist):")
+    print(f"   {anchor_after_response[:250] if anchor_after_response else 'N/A'}")
 
-    if anchor_hits >= baseline_hits - 1:
-        print("\n✓ SUCCESS: Anchor response contains similar information!")
-        print("  → KDA state injection may be working")
-    elif anchor_hits > 0:
-        print("\n◐ PARTIAL: Anchor has some info but less than baseline")
-        print("  → KDA state partially preserved")
+    # Analysis
+    print("\n" + "=" * 70)
+    print("ANALYSIS")
+    print("=" * 70)
+
+    if after_hits > fresh_hits:
+        print("✓ INTERESTING: Anchor AFTER has more keywords than FRESH!")
+        print("  → KDA state might be persisting between requests")
+        print("  → This suggests semantic info IS in the recurrent state")
+    elif after_hits == fresh_hits:
+        print("✗ NO DIFFERENCE: Anchor AFTER same as FRESH")
+        print("  → KDA state is NOT persisting (or not containing semantic info)")
+        print("  → Need explicit save/load implementation")
     else:
-        print("\n✗ EXPECTED: Anchor has no context information")
-        print("  → This confirms KDA state is NOT being injected yet")
-        print("  → Need to implement save/load in AnchorConnector")
+        print("? UNEXPECTED: Anchor AFTER has fewer keywords than FRESH")
+        print("  → Results might be noisy, consider running multiple times")
 
     return True
 
