@@ -350,9 +350,15 @@ def test_logit_comparison_with_vllm_api():
     """
     Full logit comparison test using vLLM API server.
 
-    Tests whether:
-    - Compressed context + loaded KDA → similar logits to full context
-    - Fresh generation (no state) → different logits (control)
+    ABLATION STUDY - 4 conditions:
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │  Condition          │  KDA State  │  MLA K,V  │  Expected Result    │
+    ├─────────────────────────────────────────────────────────────────────┤
+    │  1. No state        │     ✗       │     ✗     │  Hallucination      │
+    │  2. MLA only        │     ✗       │     ✓     │  Good (has content) │
+    │  3. KDA only        │     ✓       │     ✗     │  Partial?           │
+    │  4. Both KDA + MLA  │     ✓       │     ✓     │  Best (full recall) │
+    └─────────────────────────────────────────────────────────────────────┘
 
     Requires: vLLM server running on localhost:8000
     """
@@ -361,7 +367,7 @@ def test_logit_comparison_with_vllm_api():
     VLLM_API_URL = "http://localhost:8000"
 
     print("\n" + "=" * 70)
-    print("TEST: KDA Compressed Context Logit Comparison (via API)")
+    print("TEST: KDA + MLA Ablation Study (via API)")
     print("=" * 70)
 
     # Check if server is running
@@ -520,6 +526,31 @@ def test_logit_comparison_with_vllm_api():
     else:
         print("? UNEXPECTED: Anchor AFTER has fewer keywords than FRESH")
         print("  → Results might be noisy, consider running multiple times")
+
+    # Full ablation study design
+    print("\n" + "=" * 70)
+    print("FULL ABLATION STUDY (requires AnchorConnector implementation)")
+    print("=" * 70)
+    print("""
+    To properly test KDA vs MLA contribution, we need 4 conditions:
+
+    ┌─────────────────────────────────────────────────────────────────────┐
+    │  #  │  Condition     │  KDA  │  MLA  │  Expected                    │
+    ├─────────────────────────────────────────────────────────────────────┤
+    │  1  │  No state      │   ✗   │   ✗   │  Hallucination (control)     │
+    │  2  │  MLA only      │   ✗   │   ✓   │  Should work (has V values)  │
+    │  3  │  KDA only      │   ✓   │   ✗   │  Partial? (attention only)   │
+    │  4  │  Both          │   ✓   │   ✓   │  Best (full recall)          │
+    └─────────────────────────────────────────────────────────────────────┘
+
+    Implementation needed in AnchorConnector:
+    1. POST /v1/anchors/save    - Save KDA and/or MLA after context
+    2. POST /v1/anchors/load    - Load specific state before query
+       - load_kda: bool
+       - load_mla: bool
+
+    Then test each combination to see contribution of each component.
+    """)
 
     return True
 
