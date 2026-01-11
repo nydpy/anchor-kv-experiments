@@ -121,7 +121,7 @@ def test_kimi_linear_basic():
     from vllm import LLM, SamplingParams
 
     # Configuration
-    model_name = "moonshotai/Kimi-Linear-Instruct"
+    model_name = "moonshotai/Kimi-Linear-48B-A3B-Instruct"
     tensor_parallel = torch.cuda.device_count()
 
     print(f"Loading {model_name}...")
@@ -165,7 +165,7 @@ def test_anchor_with_kimi_linear():
 
     from vllm import LLM, SamplingParams
 
-    model_name = "moonshotai/Kimi-Linear-Instruct"
+    model_name = "moonshotai/Kimi-Linear-48B-A3B-Instruct"
     tensor_parallel = torch.cuda.device_count()
 
     llm = LLM(
@@ -224,7 +224,7 @@ def test_kda_state_access():
 
     from vllm import LLM, SamplingParams
 
-    model_name = "moonshotai/Kimi-Linear-Instruct"
+    model_name = "moonshotai/Kimi-Linear-48B-A3B-Instruct"
     tensor_parallel = torch.cuda.device_count()
 
     llm = LLM(

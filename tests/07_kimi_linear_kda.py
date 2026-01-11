@@ -18,7 +18,7 @@ Kimi-Linear is a hybrid model:
 - KDA layers: Linear attention with recurrent state S
 - MLA layers: Standard attention with K,V cache
 
-MODEL: moonshotai/Kimi-Linear-Instruct
+MODEL: moonshotai/Kimi-Linear-48B-A3B-Instruct
 - 48B total params, 3B activated (MoE)
 - 1M context support
 - 75% KV cache reduction
@@ -40,7 +40,7 @@ import torch
 from typing import Optional, Tuple, List, Dict, Any
 
 # Configuration
-MODEL_NAME = "moonshotai/Kimi-Linear-Instruct"
+MODEL_NAME = "moonshotai/Kimi-Linear-48B-A3B-Instruct"
 TENSOR_PARALLEL_SIZE = 8  # For 8× L4
 MAX_MODEL_LEN = 32768  # Start small, increase as needed
 
