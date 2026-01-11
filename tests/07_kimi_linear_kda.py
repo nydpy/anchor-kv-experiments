@@ -54,11 +54,14 @@ def get_gpu_config():
     # Kimi-Linear 48B needs ~96GB FP16, no AWQ version available yet
     # So we need sufficient total GPU memory
 
-    if total_mem >= 160:  # 8× L4 (192GB) or 4× A100 (160GB)
+    if total_mem >= 192:  # 8× L4 (192GB)
         max_len = 32768
         quant = None
+    elif total_mem >= 160:  # 4× A100 40GB (160GB)
+        max_len = 16384  # Reduced to avoid OOM
+        quant = None
     elif total_mem >= 80:  # 2× A100 (80GB)
-        max_len = 16384
+        max_len = 8192
         quant = None
     else:
         # Not enough memory - need 8× L4 or equivalent
@@ -82,7 +85,8 @@ def setup_vllm_engine(gpu_count, max_len):
         "tensor_parallel_size": gpu_count,
         "max_model_len": max_len,
         "trust_remote_code": True,
-        "gpu_memory_utilization": 0.95,
+        "gpu_memory_utilization": 0.85,  # Lower to avoid OOM during warmup
+        "max_num_seqs": 32,  # Limit concurrent sequences
     }
 
     llm = LLM(**llm_config)
