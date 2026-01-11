@@ -1,51 +1,39 @@
 #!/bin/bash
-# Setup vLLM with Anchor Connector
+# Setup vLLM with Anchor Connector for Kimi-Linear
 
 set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "=========================================="
 echo "Setting up vLLM with Anchor Connector"
 echo "=========================================="
 
-# Install vLLM
-echo ""
-echo "1. Installing vLLM..."
-pip install vllm
-
-# Find vLLM installation path
-VLLM_PATH=$(python -c "import vllm; import os; print(os.path.dirname(vllm.__file__))")
-echo "   vLLM installed at: $VLLM_PATH"
-
-# Create connector directory if needed
-CONNECTOR_DIR="$VLLM_PATH/distributed/kv_transfer/kv_connector/v1"
-mkdir -p "$CONNECTOR_DIR"
-
-# Copy anchor connector
-echo ""
-echo "2. Installing anchor connector..."
-cp src/anchor_connector.py "$CONNECTOR_DIR/"
-echo "   Copied to: $CONNECTOR_DIR/anchor_connector.py"
-
-# Patch factory.py to register anchor connector
-echo ""
-echo "3. Registering anchor connector in factory..."
-
-FACTORY_FILE="$VLLM_PATH/distributed/kv_transfer/kv_connector/factory.py"
-
-# Check if already patched
-if grep -q "AnchorConnector" "$FACTORY_FILE" 2>/dev/null; then
-    echo "   Already registered, skipping..."
+# Check if vLLM folder exists
+if [ -d "$SCRIPT_DIR/vllm" ]; then
+    echo ""
+    echo "1. Installing vLLM from local fork..."
+    pip install -e "$SCRIPT_DIR/vllm"
 else
-    # Add import at top of file
-    sed -i.bak '1s/^/from vllm.distributed.kv_transfer.kv_connector.v1.anchor_connector import AnchorConnector\n/' "$FACTORY_FILE"
+    echo ""
+    echo "1. vLLM folder not found. Cloning..."
+    cd "$SCRIPT_DIR"
+    git clone https://github.com/vllm-project/vllm.git
+    cd vllm
+    git checkout -b feature/anchor-connector
 
-    # Add to connector registry (this is a simplified patch)
-    echo "   Patched factory.py"
-    echo "   NOTE: You may need to manually register 'anchor' in the connector factory"
+    # Copy our anchor connector
+    echo ""
+    echo "2. Installing anchor connector..."
+    cp "$SCRIPT_DIR/src/anchor_connector.py" \
+       "$SCRIPT_DIR/vllm/vllm/distributed/kv_transfer/kv_connector/v1/"
+
+    # Install
+    pip install -e "$SCRIPT_DIR/vllm"
 fi
 
 echo ""
-echo "4. Verifying installation..."
+echo "3. Verifying installation..."
 python -c "
 from vllm.distributed.kv_transfer.kv_connector.v1.anchor_connector import AnchorConnector
 print('   ✓ AnchorConnector imported successfully')
@@ -55,6 +43,9 @@ echo ""
 echo "=========================================="
 echo "Setup complete!"
 echo ""
-echo "Run tests:"
-echo "  python tests/test_vllm_integration.py"
+echo "Usage with Kimi-Linear:"
+echo "  python -c \"from vllm import LLM; llm = LLM('moonshotai/Kimi-Linear-48B-A3B-Instruct', ...)\""
+echo ""
+echo "With anchor connector:"
+echo "  vllm serve model --kv-connector AnchorConnector --kv-connector-config '{\"storage_path\": \"/tmp/anchors\"}'"
 echo "=========================================="
