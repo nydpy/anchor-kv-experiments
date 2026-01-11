@@ -41,40 +41,49 @@ from typing import Optional, Tuple, List, Dict, Any
 
 # Configuration
 MODEL_NAME = "moonshotai/Kimi-Linear-48B-A3B-Instruct"
-TENSOR_PARALLEL_SIZE = torch.cuda.device_count()  # Auto-detect GPUs
-GPU_MEM = torch.cuda.get_device_properties(0).total_memory / 1e9 if TENSOR_PARALLEL_SIZE > 0 else 0
 
-# Auto-configure based on GPU type
-if GPU_MEM < 20:  # T4 (16GB)
-    MAX_MODEL_LEN = 8192
-    USE_QUANTIZATION = "awq"
-elif GPU_MEM < 30:  # L4 (24GB)
-    MAX_MODEL_LEN = 16384
-    USE_QUANTIZATION = "awq"
-else:  # A100 (40GB+)
-    MAX_MODEL_LEN = 32768
-    USE_QUANTIZATION = None
+def get_gpu_config():
+    """Auto-detect GPU configuration."""
+    if not torch.cuda.is_available():
+        return None, 0, 0, None
+
+    gpu_count = torch.cuda.device_count()
+    gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1e9
+    total_mem = gpu_count * gpu_mem
+
+    # Kimi-Linear 48B needs ~96GB FP16, no AWQ version available yet
+    # So we need sufficient total GPU memory
+
+    if total_mem >= 160:  # 8× L4 (192GB) or 4× A100 (160GB)
+        max_len = 32768
+        quant = None
+    elif total_mem >= 80:  # 2× A100 (80GB)
+        max_len = 16384
+        quant = None
+    else:
+        # Not enough memory - need 8× L4 or equivalent
+        max_len = 8192
+        quant = None  # AWQ not available for Kimi-Linear
+
+    return gpu_count, gpu_mem, total_mem, max_len
 
 
-def setup_vllm_engine():
+def setup_vllm_engine(gpu_count, max_len):
     """Initialize vLLM with Kimi-Linear."""
     from vllm import LLM, SamplingParams
 
     print(f"\nLoading {MODEL_NAME}...")
-    print(f"Tensor Parallel: {TENSOR_PARALLEL_SIZE}")
-    print(f"Max Model Len: {MAX_MODEL_LEN}")
-    print(f"Quantization: {USE_QUANTIZATION or 'None'}")
+    print(f"Tensor Parallel: {gpu_count}")
+    print(f"Max Model Len: {max_len}")
+    print(f"Quantization: None (no AWQ version available)")
 
     llm_config = {
         "model": MODEL_NAME,
-        "tensor_parallel_size": TENSOR_PARALLEL_SIZE,
-        "max_model_len": MAX_MODEL_LEN,
+        "tensor_parallel_size": gpu_count,
+        "max_model_len": max_len,
         "trust_remote_code": True,
-        "gpu_memory_utilization": 0.9,
+        "gpu_memory_utilization": 0.95,
     }
-
-    if USE_QUANTIZATION:
-        llm_config["quantization"] = USE_QUANTIZATION
 
     llm = LLM(**llm_config)
 
@@ -274,8 +283,9 @@ def main():
     positions.
 
     Requirements:
-    - 8× L4 GPUs (192GB total)
+    - 8× L4 GPUs (192GB total) OR 2× A100 40GB (80GB total)
     - vLLM with Kimi-Linear support
+    - No quantized version available yet (need full memory)
     """)
 
     # Check if we can import vLLM
@@ -288,15 +298,30 @@ def main():
         return
 
     # Check GPU availability
-    if torch.cuda.is_available():
-        gpu_count = torch.cuda.device_count()
-        print(f"✓ CUDA available: {gpu_count} GPUs")
-        for i in range(gpu_count):
-            name = torch.cuda.get_device_name(i)
-            mem = torch.cuda.get_device_properties(i).total_memory / 1e9
-            print(f"  GPU {i}: {name} ({mem:.1f}GB)")
-    else:
+    gpu_count, gpu_mem, total_mem, max_len = get_gpu_config()
+
+    if gpu_count is None:
         print("✗ CUDA not available - need GPUs for Kimi-Linear")
+        return
+
+    print(f"✓ CUDA available: {gpu_count} GPUs")
+    for i in range(gpu_count):
+        name = torch.cuda.get_device_name(i)
+        mem = torch.cuda.get_device_properties(i).total_memory / 1e9
+        print(f"  GPU {i}: {name} ({mem:.1f}GB)")
+
+    print(f"\n  Total GPU memory: {total_mem:.0f}GB")
+
+    # Check if we have enough memory
+    MIN_MEMORY_GB = 80  # Minimum for Kimi-Linear 48B
+    if total_mem < MIN_MEMORY_GB:
+        print(f"\n✗ Insufficient GPU memory!")
+        print(f"  Need: {MIN_MEMORY_GB}GB minimum (Kimi-Linear 48B = ~96GB FP16)")
+        print(f"  Have: {total_mem:.0f}GB")
+        print(f"\n  Options:")
+        print(f"  1. Use 8× L4 GPUs (192GB total)")
+        print(f"  2. Use 2× A100 40GB (80GB total)")
+        print(f"  3. Wait for AWQ/GPTQ quantized version")
         return
 
     # Initialize model
@@ -305,7 +330,7 @@ def main():
     print("-" * 70)
 
     try:
-        llm = setup_vllm_engine()
+        llm = setup_vllm_engine(gpu_count, max_len)
     except Exception as e:
         print(f"Error loading model: {e}")
         print("\nMake sure you have:")
