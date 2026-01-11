@@ -65,7 +65,7 @@ import torch.nn.functional as F
 
 # Configuration
 MODEL_NAME = "moonshotai/Kimi-Linear-Instruct"
-TENSOR_PARALLEL_SIZE = 8
+TENSOR_PARALLEL_SIZE = 4  # 4x A100 40GB
 MAX_MODEL_LEN = 32768
 
 
@@ -580,10 +580,11 @@ def main():
         gpu_count = torch.cuda.device_count()
         print(f"Found {gpu_count} GPUs")
 
-        if gpu_count >= 8:
+        # 4x A100 40GB (160GB total) is sufficient for Kimi-Linear
+        if gpu_count >= 4:
             test_logit_comparison_with_vllm()
         else:
-            print(f"Need 8 GPUs for Kimi-Linear, have {gpu_count}")
+            print(f"Need at least 4 GPUs for Kimi-Linear, have {gpu_count}")
             print("Skipping full test. Storage verification passed.")
     else:
         print("No CUDA available. Storage verification passed.")
