@@ -41,8 +41,19 @@ from typing import Optional, Tuple, List, Dict, Any
 
 # Configuration
 MODEL_NAME = "moonshotai/Kimi-Linear-48B-A3B-Instruct"
-TENSOR_PARALLEL_SIZE = 8  # For 8× L4
-MAX_MODEL_LEN = 32768  # Start small, increase as needed
+TENSOR_PARALLEL_SIZE = torch.cuda.device_count()  # Auto-detect GPUs
+GPU_MEM = torch.cuda.get_device_properties(0).total_memory / 1e9 if TENSOR_PARALLEL_SIZE > 0 else 0
+
+# Auto-configure based on GPU type
+if GPU_MEM < 20:  # T4 (16GB)
+    MAX_MODEL_LEN = 8192
+    USE_QUANTIZATION = "awq"
+elif GPU_MEM < 30:  # L4 (24GB)
+    MAX_MODEL_LEN = 16384
+    USE_QUANTIZATION = "awq"
+else:  # A100 (40GB+)
+    MAX_MODEL_LEN = 32768
+    USE_QUANTIZATION = None
 
 
 def setup_vllm_engine():
@@ -51,13 +62,21 @@ def setup_vllm_engine():
 
     print(f"\nLoading {MODEL_NAME}...")
     print(f"Tensor Parallel: {TENSOR_PARALLEL_SIZE}")
+    print(f"Max Model Len: {MAX_MODEL_LEN}")
+    print(f"Quantization: {USE_QUANTIZATION or 'None'}")
 
-    llm = LLM(
-        model=MODEL_NAME,
-        tensor_parallel_size=TENSOR_PARALLEL_SIZE,
-        max_model_len=MAX_MODEL_LEN,
-        trust_remote_code=True,
-    )
+    llm_config = {
+        "model": MODEL_NAME,
+        "tensor_parallel_size": TENSOR_PARALLEL_SIZE,
+        "max_model_len": MAX_MODEL_LEN,
+        "trust_remote_code": True,
+        "gpu_memory_utilization": 0.9,
+    }
+
+    if USE_QUANTIZATION:
+        llm_config["quantization"] = USE_QUANTIZATION
+
+    llm = LLM(**llm_config)
 
     print("Model loaded successfully!")
     return llm
