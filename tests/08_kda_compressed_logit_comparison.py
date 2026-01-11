@@ -378,16 +378,15 @@ def test_logit_comparison_with_vllm_api():
 
     test_data = get_test_contexts()[0]
 
-    def get_completion_with_logprobs(prompt: str, max_tokens: int = 1):
-        """Get completion with logprobs from vLLM API."""
+    def get_chat_completion(messages: list, max_tokens: int = 50):
+        """Get chat completion from vLLM API."""
         response = requests.post(
-            f"{VLLM_API_URL}/v1/completions",
+            f"{VLLM_API_URL}/v1/chat/completions",
             json={
                 "model": "moonshotai/Kimi-Linear-48B-A3B-Instruct",
-                "prompt": prompt,
+                "messages": messages,
                 "max_tokens": max_tokens,
                 "temperature": 0.0,
-                "logprobs": 20,  # Get top 20 logprobs
             },
             timeout=60,
         )
@@ -404,24 +403,23 @@ def test_logit_comparison_with_vllm_api():
     print("-" * 70)
 
     context = test_data["context"]
-    query = "\n\nWhat are the hobbies?"
+    question = "What are Alice's hobbies?"
 
-    full_prompt = context + query
+    # Full context as system message
+    baseline_messages = [
+        {"role": "system", "content": f"Use the following context to answer questions:\n\n{context}"},
+        {"role": "user", "content": question}
+    ]
+
     print(f"Context length: {len(context)} chars")
-    print(f"Full prompt: {full_prompt[:80]}...")
+    print(f"Question: {question}")
 
-    baseline_result = get_completion_with_logprobs(full_prompt)
+    baseline_result = get_chat_completion(baseline_messages)
     if not baseline_result:
         return False
 
-    baseline_choice = baseline_result["choices"][0]
-    baseline_token = baseline_choice["text"]
-    baseline_logprobs = baseline_choice.get("logprobs", {})
-
-    print(f"Baseline predicts: '{baseline_token}'")
-    if baseline_logprobs and baseline_logprobs.get("top_logprobs"):
-        top_tokens = list(baseline_logprobs["top_logprobs"][0].keys())[:5]
-        print(f"Top tokens: {top_tokens}")
+    baseline_response = baseline_result["choices"][0]["message"]["content"]
+    print(f"Baseline response: {baseline_response[:200]}...")
 
     # ─────────────────────────────────────────────────────────────────
     # STEP 2: Note about KDA state
@@ -433,22 +431,26 @@ def test_logit_comparison_with_vllm_api():
     print("Check /tmp/anchors for saved states.")
 
     # ─────────────────────────────────────────────────────────────────
-    # STEP 3: TEST - Compressed anchor (if AnchorConnector supports it)
+    # STEP 3: TEST - Compressed anchor (no context, just anchor tag)
     # ─────────────────────────────────────────────────────────────────
     print("\n" + "-" * 70)
-    print("STEP 3: TEST - Compressed Context Query")
+    print("STEP 3: TEST - Anchor Only (no context)")
     print("-" * 70)
 
-    # For now, just test that the API works and we can get logprobs
-    # The actual KDA state injection happens via AnchorConnector
-    anchor_prompt = f"<{test_data['id']}/>" + query
-    print(f"Anchor prompt: {anchor_prompt}")
+    # Anchor tag instead of full context
+    anchor_tag = f"<{test_data['id']}/>"
+    anchor_messages = [
+        {"role": "system", "content": f"Previous context was saved as anchor: {anchor_tag}"},
+        {"role": "user", "content": question}
+    ]
 
-    anchor_result = get_completion_with_logprobs(anchor_prompt)
+    print(f"Using anchor: {anchor_tag}")
+
+    anchor_result = get_chat_completion(anchor_messages)
+    anchor_response = None
     if anchor_result:
-        anchor_choice = anchor_result["choices"][0]
-        anchor_token = anchor_choice["text"]
-        print(f"Anchor predicts: '{anchor_token}'")
+        anchor_response = anchor_result["choices"][0]["message"]["content"]
+        print(f"Anchor response: {anchor_response[:200]}...")
 
     # ─────────────────────────────────────────────────────────────────
     # STEP 4: Compare responses
@@ -457,30 +459,38 @@ def test_logit_comparison_with_vllm_api():
     print("RESULTS")
     print("=" * 70)
 
+    # Check if key facts are mentioned
+    expected_keywords = ["hiking", "photography", "cooking"]
+
+    baseline_hits = sum(1 for kw in expected_keywords if kw.lower() in baseline_response.lower())
+    anchor_hits = sum(1 for kw in expected_keywords if anchor_response and kw.lower() in anchor_response.lower()) if anchor_response else 0
+
     print(f"""
     ┌────────────────────────────────────────────────────────────────────┐
-    │  Comparison                                                        │
+    │  Response Comparison                                               │
     ├────────────────────────────────────────────────────────────────────┤
-    │  Full context predicts:   {baseline_token:>40}  │
-    │  Anchor prompt predicts:  {anchor_token if anchor_result else 'N/A':>40}  │
-    │  Match:                   {str(baseline_token == anchor_token if anchor_result else False):>40}  │
+    │  Expected keywords: {', '.join(expected_keywords):>45}  │
+    │  Baseline found:    {baseline_hits}/{len(expected_keywords)} keywords                                      │
+    │  Anchor found:      {anchor_hits}/{len(expected_keywords)} keywords                                      │
     └────────────────────────────────────────────────────────────────────┘
     """)
 
-    # Compare logprobs if available
-    if baseline_logprobs and anchor_result:
-        baseline_top = baseline_logprobs.get("top_logprobs", [{}])[0]
-        anchor_top = anchor_result["choices"][0].get("logprobs", {}).get("top_logprobs", [{}])[0]
+    print("BASELINE RESPONSE:")
+    print(f"  {baseline_response[:300]}")
+    print()
+    print("ANCHOR RESPONSE:")
+    print(f"  {anchor_response[:300] if anchor_response else 'N/A'}")
 
-        if baseline_top and anchor_top:
-            baseline_tokens = set(baseline_top.keys())
-            anchor_tokens = set(anchor_top.keys())
-            overlap = len(baseline_tokens & anchor_tokens)
-            print(f"Top-{len(baseline_top)} token overlap: {overlap}/{len(baseline_top)}")
-
-    print("\nNote: For true KDA state comparison, the AnchorConnector must")
-    print("save state after context processing and load it for anchor queries.")
-    print("Check /tmp/anchors for saved states.")
+    if anchor_hits >= baseline_hits - 1:
+        print("\n✓ SUCCESS: Anchor response contains similar information!")
+        print("  → KDA state injection may be working")
+    elif anchor_hits > 0:
+        print("\n◐ PARTIAL: Anchor has some info but less than baseline")
+        print("  → KDA state partially preserved")
+    else:
+        print("\n✗ EXPECTED: Anchor has no context information")
+        print("  → This confirms KDA state is NOT being injected yet")
+        print("  → Need to implement save/load in AnchorConnector")
 
     return True
 
